@@ -1,0 +1,197 @@
+#!/usr/bin/bash
+###############################################################################
+#
+# Script to do dedisperse a filterbank file in a given range. "dmlist" needed
+#                                                                    M. Cruces
+###############################################################################
+#module load anaconda
+module load sigproc
+
+start=`date +%s`
+if [ $# -eq 0 ]
+then
+echo 
+echo "No argunment(s) provided. Type desdisperse_htrun -h for help "
+exit 1
+fi
+
+while getopts ":hf:d:zt:c:o:" opt ; do
+  case ${opt} in
+    h )
+      echo 
+      echo "dedisperse_htrun - creating time serie(s) for an HTRU-North filterbank's file "
+      echo "                            Author: M. Cruces                                  "
+      echo "                            Version: 17.12.18                                  "
+      echo "                                                                               "
+      echo "Usage: dedisperse_htrun -f {filename} -d {range/value} -{options}              "
+      echo "    -h             Display this nice help message.                             "
+      echo "    -f filename    Name of filterbank file to dedisperse (before .fil).        "
+      echo "    -d start:end   DM range to dedisperse [pc cm**-3]. If single value given   "
+      echo "                   dedispersion will be done at that single value.             "
+      echo "    -z             Apply zero-DM RFI mitigation.                               "
+      echo "    -t value       Do not  apply Zero-dm before this threshold (def=0)         "
+      echo "    -c file        List of channels to ignore from ascii file (def=none).      "
+      echo "    -o output      File name for desdispersed time series (.tim).              "
+      exit 0
+      ;;
+    f ) source=$OPTARG;;
+    d ) IFS=':' read -a DM <<< "$OPTARG"
+            st_DM=${DM[0]}
+            end_DM=${DM[1]};;     
+    z ) zerodm="-subzero" ;;
+    t ) threshold=$OPTARG ;;
+    c ) badchans="-i "$OPTARG ;;
+    o ) output=$OPTARG;;
+  esac
+done
+
+if [ ! -f $source".fil" ]
+then
+    echo "File "$source".fil not found!"
+    exit 1
+fi
+
+if [ -z "$source" ] | [ ${#source[@]} -eq 0 ]
+then
+   echo "Please specify filename"
+   exit 2
+fi
+
+if [ -z "$DM" ] | [ ${#DM[@]} -eq 0 ]
+then
+   echo "Please  specify  DM range/value"
+   exit 3
+fi
+
+if [ -z "$output" ]
+then
+   output_file=$source
+else
+  output_file=$output
+fi
+
+if [ -z "$threshold" ]
+then
+   thres_dm=0
+elif [ ! -z "$threshold" ] & [ ! -z "$zerodm" ]
+then
+  thres_dm=$threshold
+fi
+
+if [ -z "$end_DM" ]
+then
+      echo "dedispersing "${source}".fil at DM="$st_DM" ..."
+      dedisperse="dedisperse "${source}".fil -d "$st_DM" "$zerodm" "$badchans
+      $dedisperse  >$output_file".tim"
+else
+     echo "Creating time series of "${source}".fil from DM="${st_DM}" to DM= "${end_DM}
+     dm_i=`awk -v c=1 -v t=$st_DM 'NR==1{d=$c-t;d=d<0?-d:d;v=$c;next}{m=$c-t;m=m<0?-m:m}m<d{d=m;v=$c}END{print v}' dmlist`
+     dm_f=`awk -v c=1 -v t=$end_DM 'NR==1{d=$c-t;d=d<0?-d:d;v=$c;next}{m=$c-t;m=m<0?-m:m}m<d{d=m;v=$c}END{print v}' dmlist`
+     oldIFS="$IFS"
+     IFS=$'\n' dmlist=($(<dmlist))
+     IFS="$oldIFS"
+     value1=$dm_i
+     for i in "${!dmlist[@]}"; do
+         if [[ "${dmlist[$i]}" = "${value1}" ]]; then
+         l=$i
+         fi
+     done
+     value2=$dm_f
+     for i in "${!dmlist[@]}"; do
+         if [[ "${dmlist[$i]}" = "${value2}" ]]; then
+         m=$i
+         fi
+     done
+    
+     while [ $[$l+1] -le $m ]
+     do
+     k=`echo " $l+1" | bc`
+     w=`echo " $l+2" | bc`
+     x=`echo " $l+3" | bc`
+     if [ $thres_dm -eq 0 ]
+     then
+         if [ -z  "${dmlist[$l]}" ];then
+             dedisperse1=""
+         else
+             dedisperse1="dedisperse "$source".fil -d "${dmlist[$l]}" "$zerodm" "$badchans
+         fi
+         if [ -z  "${dmlist[$k]}" ];then
+             dedisperse2=""
+         else
+             dedisperse2="dedisperse "$source".fil -d "${dmlist[$k]}" "$zerodm" "$badchans
+         fi
+         if [ -z  "${dmlist[$w]}" ];then
+             dedisperse3=""
+         else
+             dedisperse3="dedisperse "$source".fil -d "${dmlist[$w]}" "$zerodm" "$badchans
+         fi
+         if [ -z  "${dmlist[$x]}" ];then
+             dedisperse4=""
+         else
+             dedisperse4="dedisperse "$source".fil -d "${dmlist[$x]}" "$zerodm" "$badchans
+         fi
+
+         $dedisperse1 > $output_file"_"${dmlist[$l]}".tim" & $dedisperse2 > $output_file"_"${dmlist[$l+1]}".tim" & $dedisperse3 > $output_file"_"${dmlist[$l+2]}".tim" & $dedisperse4 > $output_file"_"${dmlist[$l+3]}".tim"
+         wait
+         
+     else
+         
+         if (( $(echo "${dmlist[$l]} < $thres_dm" |bc -l)  ))
+         then
+            
+         if [ -z  "${dmlist[$l]}" ];then
+             dedisperse1=""
+         else          
+             dedisperse1="dedisperse "$source".fil -d "${dmlist[$l]}" "$badchans
+         fi
+         if [ -z  "${dmlist[$k]}" ];then
+             dedisperse2=""
+         else
+             dedisperse2="dedisperse "$source".fil -d "${dmlist[$k]}" "$badchans
+             
+         fi
+         if [ -z  "${dmlist[$w]}" ];then
+             dedisperse3=""
+         else
+             dedisperse3="dedisperse "$source".fil -d "${dmlist[$w]}" "$badchans
+         fi
+         if [ -z  "${dmlist[$x]}" ];then
+             dedisperse4=""
+         else
+             dedisperse4="dedisperse "$source".fil -d "${dmlist[$x]}" "$badchans
+         fi
+             $dedisperse1 > $output_file"_"${dmlist[$l]}".tim" & $dedisperse2 > $output_file"_"${dmlist[$l+1]}".tim" & $dedisperse3 > $output_file"_"${dmlist[$l+2]}".tim" & $dedisperse4 > $output_file"_"${dmlist[$l+3]}".tim"
+             wait
+
+         elif (( $(echo "${dmlist[$l]} >= $thres_dm" |bc -l)  ))
+         then 
+         if [ -z  "${dmlist[$l]}" ];then
+             dedisperse1=""
+         else
+             dedisperse1="dedisperse "$source".fil -d "${dmlist[$l]}" "$zerodm" "$badchans
+         fi
+         if [ -z  "${dmlist[$k]}" ];then
+             dedisperse2=""
+         else    
+             dedisperse2="dedisperse "$source".fil -d "${dmlist[$k]}" "$zerodm" "$badchans
+         fi
+         if [ -z  "${dmlist[$w]}" ];then
+             dedisperse3=""
+         else
+             dedisperse3="dedisperse "$source".fil -d "${dmlist[$w]}" "$zerodm" "$badchans
+         fi
+         if [ -z  "${dmlist[$x]}" ];then
+             dedisperse4=""
+         else
+             dedisperse4="dedisperse "$source".fil -d "${dmlist[$x]}" "$zerodm" "$badchans
+         fi   
+             $dedisperse1 > $output_file"_"${dmlist[$l]}".tim" & $dedisperse2 > $output_file"_"${dmlist[$l+1]}".tim" & $dedisperse3 > $output_file"_"${dmlist[$l+2]}".tim" & $dedisperse4 > $output_file"_"${dmlist[$l+1]}".tim" 
+             wait
+         fi
+     fi 
+     l=$[$l+4]
+     done
+fi
+end=`date +%s`
+runtime=$((end-start))
+echo "running time: "$runtime" seconds"

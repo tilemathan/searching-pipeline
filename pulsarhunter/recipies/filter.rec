@@ -1,0 +1,3 @@
+import $ARGS1 to prdfile
+process filter prdfile $ARGS2 
+
